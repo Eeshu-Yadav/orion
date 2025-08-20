@@ -38,7 +38,7 @@ pub struct RandomBalancer<E> {
 impl<E> RandomBalancer<E> {
     #[allow(clippy::expect_used)]
     pub fn new(items: impl IntoIterator<Item = LbItem<E>>) -> Self {
-        let rng = SmallRng::from_rng(rand::thread_rng()).expect("RNG must be valid");
+        let rng = SmallRng::from_rng(rand::thread_rng()).unwrap_or_else(|_| SmallRng::seed_from_u64(0));
         RandomBalancer::new_with_rng(items, rng)
     }
 

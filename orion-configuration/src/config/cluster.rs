@@ -251,6 +251,7 @@ mod envoy_conversions {
     };
     use std::{collections::BTreeSet, net::SocketAddr, num::NonZeroU32};
 
+    #[allow(clippy::too_many_lines)]
     impl TryFrom<EnvoyCluster> for Cluster {
         type Error = GenericError;
         fn try_from(envoy: EnvoyCluster) -> Result<Self, Self::Error> {
@@ -301,8 +302,8 @@ mod envoy_conversions {
                 connection_pool_per_downstream_connection,
                 cluster_discovery_type,
                 lb_config,
-                dns_jitter,
-                lrs_report_endpoint_metrics,
+                dns_jitter: _,
+                lrs_report_endpoint_metrics: _,
             } = envoy;
             let name = required!(name)?;
             (|| -> Result<Self, GenericError> {
@@ -350,11 +351,9 @@ mod envoy_conversions {
                     upstream_config,
                     track_cluster_stats,
                     preconnect_policy,
-                    connection_pool_per_downstream_connection,
-                    dns_jitter, // cluster_discovery_type,
-                    lrs_report_endpoint_metrics
-                                                              // lb_config
-
+                    connection_pool_per_downstream_connection
+                    // cluster_discovery_type,                                                              
+                    // lb_config
                 )?;
 
                 if let Some(lb_config_type) = &lb_config {
@@ -498,10 +497,11 @@ mod envoy_conversions {
                 }
                 Ok(Self { endpoints })
             })();
-            if !cluster_name.is_empty() {
-                return ret.with_name(cluster_name);
+            if cluster_name.is_empty() {
+                ret
+            } else {
+                ret.with_name(cluster_name)
             }
-            ret
         }
     }
 
@@ -678,7 +678,7 @@ mod envoy_conversions {
                 SupportedEnvoyTransportSocket::DownstreamTlsContext(_) => {
                     Err(GenericError::unsupported_variant("DownstreamTlsContext"))
                 },
-                SupportedEnvoyTransportSocket::UpstreamTlsContext(x) => x.try_into(),
+                SupportedEnvoyTransportSocket::UpstreamTlsContext(x) => (*x).try_into(),
             }
         }
     }

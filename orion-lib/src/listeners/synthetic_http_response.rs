@@ -27,15 +27,17 @@ use http_body_util::Full;
 
 #[derive(Debug, thiserror::Error)]
 // TODO: Error type for synthetic response validation - implement validation logic or remove if unused
+#[allow(dead_code)]
+#[allow(clippy::enum_variant_names)]
 pub enum InvalidSyntheticResponse {
     #[error(transparent)]
-    BadHttpResponse(#[from] http::Error),
+    HttpResponse(#[from] http::Error),
     #[error(transparent)]
-    InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
+    HeaderValue(#[from] http::header::InvalidHeaderValue),
     #[error(transparent)]
-    InvalidUri(#[from] InvalidUri),
+    Uri(#[from] InvalidUri),
     #[error(transparent)]
-    InvalidUriParts(#[from] InvalidUriParts),
+    UriParts(#[from] InvalidUriParts),
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +58,7 @@ impl SyntheticHttpResponse {
         Self { http_status: StatusCode::BAD_GATEWAY, body: Bytes::default(), close_connection: true }
     }
 
+    // TODO: Implement forbidden response functionality - used for access control features
     #[allow(dead_code)]
     pub fn forbidden(msg: &str) -> Self {
         Self {
@@ -67,6 +70,7 @@ impl SyntheticHttpResponse {
     }
 
     // TODO: Implement unavailable response - used for service health checks
+    #[allow(dead_code)]
     pub fn unavailable() -> Self {
         Self { http_status: StatusCode::SERVICE_UNAVAILABLE, body: Bytes::default(), close_connection: true }
     }
@@ -79,21 +83,8 @@ impl SyntheticHttpResponse {
         Self { http_status: StatusCode::NOT_FOUND, body: Bytes::default(), close_connection: false }
     }
 
-    #[allow(dead_code)]
-    pub fn upgrade_required() -> Self {
-        Self { http_status: StatusCode::UPGRADE_REQUIRED, body: Bytes::default(), close_connection: true }
-    }
-
-    #[allow(dead_code)]
-    pub fn bad_request() -> Self {
-        Self { http_status: StatusCode::BAD_REQUEST, body: Bytes::default(), close_connection: true }
-    }
-
-    pub fn not_allowed() -> Self {
-        Self { http_status: StatusCode::METHOD_NOT_ALLOWED, body: Bytes::default(), close_connection: true }
-    }
-
     // TODO: Implement custom error responses - used for flexible error handling
+    #[allow(dead_code)]
     pub fn custom_error(http_status: StatusCode) -> Self {
         Self { http_status, body: Bytes::default(), close_connection: false }
     }

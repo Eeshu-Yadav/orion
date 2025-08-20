@@ -96,7 +96,7 @@ mod envoy_conversions {
     };
     use orion_data_plane_api::decode::from_serde_deserializer;
     pub use orion_data_plane_api::envoy_data_plane_api::envoy::config::bootstrap::v3::Bootstrap as EnvoyBootstrap;
-    use orion_error::Context;
+    use orion_error::ResultExtension;
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -199,7 +199,10 @@ mod envoy_conversions {
                     //     std::fs::write(new_path, serialized.as_bytes())?;
                     // }
                     let deserialized: Config = serde_yaml::from_str(&serialized)?;
-                    assert_eq!(new_conf, deserialized, "failed to roundtrip config transcoding");
+                    if new_conf != deserialized {
+                        tracing::info!("\n{}\n", serde_yaml::to_string(&deserialized)?);
+                        return Err("failed to roundtrip config transcoding".into());
+                    }
                 } else {
                     tracing::info!("skipping {}", path.display())
                 }

@@ -6,6 +6,7 @@ use orion_xds::{
 };
 use std::future::IntoFuture;
 use tracing::{debug, info};
+// Removed unused import: layer::SubscriberExt, util::SubscriberInitExt
 
 use tracing_subscriber::EnvFilter;
 
@@ -29,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             for update in notification.updates {
                 match update {
-                    XdsResourceUpdate::Update(_id, resource, _) => match resource {
+                    XdsResourceUpdate::Update(_id, resource) => match *resource {
                         XdsResourcePayload::Listener(_id, resource) => {
                             info!("Got update for listener {resource:#?}");
                         },

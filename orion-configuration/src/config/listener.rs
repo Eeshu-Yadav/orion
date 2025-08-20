@@ -54,8 +54,8 @@ mod serde_filterchains {
         value: &HashMap<FilterChainMatch, FilterChain>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        fn is_default_ref(fcm: &&FilterChainMatch) -> bool {
-            is_default(*fcm)
+        fn is_default_ref(fcm: &FilterChainMatch) -> bool {
+            is_default(fcm)
         }
         #[derive(Serialize)]
         struct SerializeAs<'a> {
@@ -222,7 +222,7 @@ impl FilterChainMatch {
     pub fn matches_source_port(&self, source_port: u16) -> MatchResult {
         if self.source_ports.is_empty() {
             MatchResult::NoRule
-        } else if self.source_ports.iter().any(|p| *p == source_port) {
+        } else if self.source_ports.contains(&source_port) {
             MatchResult::Matched(0)
         } else {
             MatchResult::FailedMatch
@@ -465,7 +465,7 @@ mod envoy_conversions {
                                         "multiple http connection managers or tcp proxies defined in filterchain",
                                     ))
                                 } else {
-                                    match http.try_into() {
+                                    match (*http).clone().try_into() {
                                         Err(e) => Err(e),
                                         Ok(http) => {
                                             main_filter = Some(MainFilter::Http(http));
@@ -596,9 +596,9 @@ mod envoy_conversions {
     #[allow(clippy::large_enum_variant)]
     #[derive(Debug, Clone)]
     enum SupportedEnvoyFilter {
-        HttpConnectionManager(EnvoyHttpConnectionManager),
-        NetworkRbac(EnvoyNetworkRbac),
-        TcpProxy(EnvoyTcpProxy),
+        HttpConnectionManager(Box<EnvoyHttpConnectionManager>),
+        NetworkRbac(Box<EnvoyNetworkRbac>),
+        TcpProxy(Box<EnvoyTcpProxy>),
     }
 
     impl TryFrom<Any> for SupportedEnvoyFilter {
@@ -606,13 +606,13 @@ mod envoy_conversions {
         fn try_from(typed_config: Any) -> Result<Self, Self::Error> {
             match typed_config.type_url.as_str() {
             "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager" => {
-                EnvoyHttpConnectionManager::decode(typed_config.value.as_slice()).map(Self::HttpConnectionManager)
+                EnvoyHttpConnectionManager::decode(typed_config.value.as_slice()).map(|hcm| Self::HttpConnectionManager(Box::new(hcm)))
             },
             "type.googleapis.com/envoy.extensions.filters.network.rbac.v3.RBAC" => {
-                EnvoyNetworkRbac::decode(typed_config.value.as_slice()).map(Self::NetworkRbac)
+                EnvoyNetworkRbac::decode(typed_config.value.as_slice()).map(|v| Self::NetworkRbac(Box::new(v)))
             },
             "type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy" => {
-                EnvoyTcpProxy::decode(typed_config.value.as_slice()).map(Self::TcpProxy)
+                EnvoyTcpProxy::decode(typed_config.value.as_slice()).map(|v| Self::TcpProxy(Box::new(v)))
             },
             _ => {
                 return Err(GenericError::unsupported_variant(typed_config.type_url));
@@ -651,7 +651,7 @@ mod envoy_conversions {
         type Error = GenericError;
         fn try_from(value: SupportedEnvoyTransportSocket) -> Result<Self, Self::Error> {
             match value {
-                SupportedEnvoyTransportSocket::DownstreamTlsContext(x) => x.try_into(),
+                SupportedEnvoyTransportSocket::DownstreamTlsContext(x) => (*x).try_into(),
                 SupportedEnvoyTransportSocket::UpstreamTlsContext(_) => {
                     Err(GenericError::unsupported_variant("UpstreamTlsContext"))
                 },

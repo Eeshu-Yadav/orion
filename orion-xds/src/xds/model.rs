@@ -18,7 +18,6 @@
 //
 //
 
-use core::result::Result::Err;
 use orion_configuration::config::{
     cluster::Cluster, cluster::ClusterLoadAssignment, common::GenericError, listener::Listener,
     network_filters::http_connection_manager::RouteConfiguration, secret::Secret,
@@ -49,14 +48,14 @@ pub type ResourceVersion = String;
 
 #[derive(Debug)]
 pub enum XdsResourceUpdate {
-    Update(ResourceId, XdsResourcePayload, ResourceVersion),
+    Update(ResourceId, Box<XdsResourcePayload>),
     Remove(ResourceId, TypeUrl),
 }
 
 impl XdsResourceUpdate {
     pub fn id(&self) -> ResourceId {
         match self {
-            XdsResourceUpdate::Update(id, _, _) | XdsResourceUpdate::Remove(id, _) => id.to_string(),
+            XdsResourceUpdate::Update(id, _) | XdsResourceUpdate::Remove(id, _) => id.clone(),
         }
     }
 }
@@ -64,7 +63,7 @@ impl XdsResourceUpdate {
 #[derive(Debug)]
 pub enum XdsResourcePayload {
     Listener(ResourceId, Listener),
-    Cluster(ResourceId, Cluster),
+    Cluster(ResourceId, Box<Cluster>),
     Endpoints(ResourceId, ClusterLoadAssignment),
     RouteConfiguration(ResourceId, RouteConfiguration),
     Secret(ResourceId, Secret),
@@ -82,7 +81,7 @@ impl TryFrom<(Resource, TypeUrl)> for XdsResourcePayload {
             },
             TypeUrl::Cluster => {
                 let decoded = EnvoyCluster::decode(res.value.as_slice())?.try_into()?;
-                Ok(XdsResourcePayload::Cluster(resource_id, decoded))
+                Ok(XdsResourcePayload::Cluster(resource_id, Box::new(decoded)))
             },
             TypeUrl::RouteConfiguration => {
                 let decoded = EnvoyRouteConfiguration::decode(res.value.as_slice())?.try_into()?;

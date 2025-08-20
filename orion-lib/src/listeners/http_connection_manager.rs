@@ -21,9 +21,7 @@
 mod direct_response;
 mod redirect;
 mod route;
-mod upgrade;
 use route::MatchedRequest;
-use upgrade::UpgradeRequestContext;
 
 use crate::{
     body::timeout_body::TimeoutBody,
@@ -38,7 +36,7 @@ use orion_configuration::config::network_filters::http_connection_manager::{
     http_filters::{http_rbac::HttpRbac, HttpFilter as HttpFilterConfig, HttpFilterType},
     route::Action,
     CodecType, ConfigSource, ConfigSourceSpecifier, HttpConnectionManager as HttpConnectionManagerConfig, RdsSpecifier,
-    RouteSpecifier, UpgradeType,
+    RouteSpecifier,
 };
 use std::{
     fmt,
@@ -50,6 +48,7 @@ use std::{
 use tokio::sync::watch;
 use tracing::debug;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HttpConnectionManagerBuilder {
     listener_name: Option<CompactString>,
@@ -64,18 +63,13 @@ impl TryFrom<ConversionContext<'_, HttpConnectionManagerConfig>> for HttpConnect
     }
 }
 
+#[allow(dead_code)]
 impl HttpConnectionManagerBuilder {
     pub fn build(self) -> Result<HttpConnectionManager> {
         let name = self.listener_name.ok_or("listener name is not set")?;
 
-        let PartialHttpConnectionManager {
-            router,
-            codec_type,
-            dynamic_route_name,
-            http_filters,
-            enabled_upgrades,
-            request_timeout,
-        } = self.connection_manager;
+        let PartialHttpConnectionManager { router, codec_type, dynamic_route_name, http_filters, request_timeout } =
+            self.connection_manager;
 
         let router_sender = watch::Sender::new(router.map(Arc::new));
 
@@ -85,7 +79,6 @@ impl HttpConnectionManagerBuilder {
             codec_type,
             dynamic_route_name,
             http_filters,
-            enabled_upgrades,
             request_timeout,
         })
     }
@@ -95,19 +88,20 @@ impl HttpConnectionManagerBuilder {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PartialHttpConnectionManager {
     router: Option<RouteConfiguration>,
     codec_type: CodecType,
     dynamic_route_name: Option<CompactString>,
     http_filters: Vec<HttpFilter>,
-    enabled_upgrades: Vec<UpgradeType>,
     request_timeout: Option<Duration>,
 }
 
 #[derive(Clone, Debug)]
 // TODO: Implement HTTP filter chain functionality - this struct defines filters for request processing
 // Used for rate limiting, RBAC, and other HTTP middleware features
+#[allow(dead_code)]
 pub struct HttpFilter {
     pub name: CompactString,
     pub disabled: bool,
@@ -117,6 +111,7 @@ pub struct HttpFilter {
 #[derive(Clone, Debug)]
 // TODO: Implement HTTP filter value types - defines the different types of HTTP filters
 // Currently supports rate limiting and RBAC (Role-Based Access Control)
+#[allow(dead_code)]
 pub enum HttpFilterValue {
     RateLimit(LocalRateLimit),
     Rbac(HttpRbac),
@@ -136,6 +131,7 @@ impl From<HttpFilterConfig> for HttpFilter {
 impl HttpFilterValue {
     // TODO: Implement HTTP filter application logic - this method applies filters to incoming requests
     // Should return Some(Response) to short-circuit request processing, or None to continue
+    #[allow(dead_code)]
     pub fn apply(&self, request: &Request<Incoming>) -> Option<Response<HttpBody>> {
         match self {
             HttpFilterValue::Rbac(rbac) => apply_authorization_rules(rbac, request),
@@ -149,7 +145,7 @@ impl TryFrom<ConversionContext<'_, HttpConnectionManagerConfig>> for PartialHttp
     fn try_from(ctx: ConversionContext<HttpConnectionManagerConfig>) -> Result<Self> {
         let ConversionContext { envoy_object: configuration, secret_manager: _ } = ctx;
         let codec_type = configuration.codec_type;
-        let enabled_upgrades = configuration.enabled_upgrades;
+
         let http_filters = configuration.http_filters.into_iter().map(HttpFilter::from).collect();
         let request_timeout = configuration.request_timeout;
 
@@ -163,14 +159,7 @@ impl TryFrom<ConversionContext<'_, HttpConnectionManagerConfig>> for PartialHttp
             RouteSpecifier::RouteConfig(config) => (None, Some(config)),
         };
 
-        Ok(PartialHttpConnectionManager {
-            router,
-            codec_type,
-            dynamic_route_name,
-            http_filters,
-            enabled_upgrades,
-            request_timeout,
-        })
+        Ok(PartialHttpConnectionManager { router, codec_type, dynamic_route_name, http_filters, request_timeout })
     }
 }
 
@@ -202,13 +191,13 @@ impl AlpnCodecs {
 #[derive(Debug)]
 // TODO: Implement HTTP connection management - this struct manages HTTP connections and routing
 // Contains filter chain, routing configuration, and connection settings
+#[allow(dead_code)]
 pub struct HttpConnectionManager {
     pub listener_name: CompactString,
     router_sender: watch::Sender<Option<Arc<RouteConfiguration>>>,
     pub codec_type: CodecType,
     dynamic_route_name: Option<CompactString>,
     http_filters: Vec<HttpFilter>,
-    enabled_upgrades: Vec<UpgradeType>,
     request_timeout: Option<Duration>,
 }
 
@@ -223,9 +212,8 @@ impl HttpConnectionManager {
         self.dynamic_route_name.as_ref()
     }
 
-    pub fn update_route(&self, mut route: RouteConfiguration) {
-        route.expand_routes(&self.enabled_upgrades);
-        let _ = self.router_sender.send_replace(Some(Arc::new(route)));
+    pub fn update_route(&self, route: Arc<RouteConfiguration>) {
+        let _ = self.router_sender.send_replace(Some(route));
     }
 
     pub fn remove_route(&self) {
@@ -257,6 +245,9 @@ impl RequestHandler<(Request<TimeoutBody<Incoming>>, SocketAddr)> for Arc<RouteC
         self,
         (request, source_address): (Request<TimeoutBody<Incoming>>, SocketAddr),
     ) -> Result<Response<PolyBody>> {
+        // needs some way to resolve the request first, _then_ apply modifications on both request and response from there
+        // might just want to implement this whole thing as a hyper service "layer"
+
         let Some(chosen_vh) = self
             .virtual_hosts
             .iter()
@@ -288,11 +279,6 @@ impl RequestHandler<(Request<TimeoutBody<Incoming>>, SocketAddr)> for Arc<RouteC
                         route_match: route_match_result,
                         source_address,
                     })
-                    .await
-            },
-            Action::Upgrade(handler) => {
-                handler
-                    .to_response(UpgradeRequestContext { request, route_match: route_match_result, source_address })
                     .await
             },
         }?;
@@ -342,8 +328,12 @@ impl Service<HttpHandlerRequest> for HttpRequestHandler {
 
 // TODO: Implement RBAC (Role-Based Access Control) authorization logic
 // This function should check permissions and return forbidden response if access is denied
+#[allow(dead_code)]
 fn apply_authorization_rules<B>(rbac: &HttpRbac, req: &Request<B>) -> Option<Response<HttpBody>> {
     debug!("Applying authorization rules {rbac:?} {:?}", &req.headers());
-    (!rbac.is_permitted(req))
-        .then(|| SyntheticHttpResponse::forbidden("RBAC: access denied").into_response(req.version()))
+    if rbac.is_permitted(req) {
+        None
+    } else {
+        Some(SyntheticHttpResponse::forbidden("RBAC: access denied").into_response(req.version()))
+    }
 }

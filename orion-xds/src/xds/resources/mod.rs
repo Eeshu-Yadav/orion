@@ -328,11 +328,11 @@ pub fn create_listener(
             ..Default::default()
         })),
         http_filters: vec![envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter {
-            name: "envoy.filters.http.router".to_string(),
+            name: "envoy.filters.http.router".to_owned(),
             config_type: Some(
                 envoy::extensions::filters::network::http_connection_manager::v3::http_filter::ConfigType::TypedConfig(
                     Any {
-                        type_url: "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router".to_string(),
+                        type_url: "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router".to_owned(),
                         value: vec![],
                     },
                 ),
@@ -420,13 +420,13 @@ mod test {
 name: cluster1
 type: STATIC
 load_assignment:
-  endpoints:
-    - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: 192.168.2.10
-                port_value: 80
+    endpoints:
+        - lb_endpoints:
+                - endpoint:
+                        address:
+                            socket_address:
+                                address: 192.168.2.10
+                                port_value: 80
 ";
         let cluster: Cluster = from_yaml(CLUSTER).unwrap();
 
