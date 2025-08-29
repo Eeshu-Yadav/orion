@@ -68,6 +68,7 @@ mod envoy_conversions {
                 use_tag_extracted_name,
                 prefix,
                 protocol_specifier,
+                resource_detectors,
             } = value;
             unsupported_field!(
                 // prefix,
@@ -75,7 +76,8 @@ mod envoy_conversions {
                 report_counters_as_deltas,
                 report_histograms_as_deltas,
                 emit_tags_as_attributes,
-                use_tag_extracted_name
+                use_tag_extracted_name,
+                resource_detectors
             )?;
 
             let orion_data_plane_api::envoy_data_plane_api::envoy::extensions::stat_sinks::open_telemetry::v3::sink_config::ProtocolSpecifier::GrpcService(grpc_srv) = protocol_specifier.ok_or_else(|| GenericError::from_msg("ProtocolSpecifier unspecified"))?;

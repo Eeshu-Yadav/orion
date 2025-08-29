@@ -370,7 +370,7 @@ mod tests {
 
         let span = tracer.try_create_span(
             context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );
@@ -410,7 +410,7 @@ mod tests {
 
         let span = tracer.try_create_span(
             context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );
@@ -450,7 +450,7 @@ mod tests {
 
         let span = tracer.try_create_span(
             context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );
@@ -489,7 +489,7 @@ mod tests {
 
         let span = tracer.try_create_span(
             context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );
@@ -513,7 +513,7 @@ mod tests {
         assert!(trace_context.is_none());
         let span = no_tracer.try_create_span(
             trace_context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );
@@ -544,7 +544,7 @@ mod tests {
 
         let span = tracer.try_create_span(
             trace_context.as_ref(),
-            &TracingKey("test", 0),
+            &TracingKey("test".to_string(), 0),
             SpanKind::Server,
             SpanName::Str::<()>("test"),
         );

@@ -985,6 +985,7 @@ mod envoy_conversions {
                 per_request_buffer_limit_bytes,
                 request_mirror_policies,
                 metadata,
+                request_body_buffer_limit,
             } = envoy;
             unsupported_field!(
                 // name,
@@ -1008,7 +1009,8 @@ mod envoy_conversions {
                 include_is_timeout_retry_header,
                 per_request_buffer_limit_bytes,
                 request_mirror_policies,
-                metadata
+                metadata,
+                request_body_buffer_limit
             )?;
             let name: CompactString = required!(name)?.into();
             (|| -> Result<_, GenericError> {
@@ -1160,6 +1162,7 @@ mod envoy_conversions {
                 per_request_buffer_limit_bytes,
                 stat_prefix,
                 action,
+                request_body_buffer_limit,
             } = envoy;
             unsupported_field!(
                 //name,
@@ -1173,7 +1176,8 @@ mod envoy_conversions {
                 // response_headers_to_remove,
                 tracing,
                 per_request_buffer_limit_bytes,
-                stat_prefix // action
+                stat_prefix, // action
+                request_body_buffer_limit
             )?;
             let response_headers_to_add = convert_vec!(response_headers_to_add)?;
             let request_headers_to_add = convert_vec!(request_headers_to_add)?;
