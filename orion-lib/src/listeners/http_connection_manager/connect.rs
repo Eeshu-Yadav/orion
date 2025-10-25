@@ -14,12 +14,22 @@
 
 //! HTTP CONNECT method implementation for tunneling TCP through HTTP
 
-use http::{Request, Response, StatusCode};
-use http_body_util::Full;
+use http::{Request, Response, StatusCode, Version};
+use http_body_util::{Empty, Full};
 use bytes::Bytes;
+use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
 use std::fmt;
 use std::io;
-use tracing::debug;
+use std::net::SocketAddr;
+use std::time::Duration;
+use tokio::io::copy_bidirectional;
+use tokio::net::TcpStream;
+use tokio::time::timeout;
+use tracing::{debug, error, info, warn};
+
+use crate::body::body_with_metrics::BodyWithMetrics;
+use crate::PolyBody;
 
 /// Errors that can occur during CONNECT handling
 #[derive(Debug)]
@@ -107,6 +117,132 @@ pub fn validate_connect_request<B>(req: &Request<B>) -> Result<String, ConnectEr
 
     debug!("Validated CONNECT request for authority: {}", authority);
     Ok(authority)
+}
+
+/// Establish TCP connection to upstream target
+///
+/// Parses the authority string (host:port), resolves it, and establishes
+/// a TCP connection with timeout and proper socket options.
+pub async fn establish_upstream_connection(authority: &str) -> Result<TcpStream, ConnectError> {
+    debug!("Establishing upstream connection to: {}", authority);
+
+    // Parse authority into SocketAddr
+    // Note: This does DNS resolution if needed
+    let addr: SocketAddr = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::net::lookup_host(authority)
+    )
+    .await
+    .map_err(|_| ConnectError::UpstreamTimeout)?
+    .map_err(|e| ConnectError::UpstreamConnectionFailed(e))?
+    .next()
+    .ok_or_else(|| {
+        ConnectError::UpstreamConnectionFailed(
+            io::Error::new(io::ErrorKind::NotFound, "No addresses found for host")
+        )
+    })?;
+
+    // Establish TCP connection with timeout
+    let stream = timeout(
+        Duration::from_secs(30),
+        TcpStream::connect(addr)
+    )
+    .await
+    .map_err(|_| ConnectError::UpstreamTimeout)?
+    .map_err(ConnectError::UpstreamConnectionFailed)?;
+
+    // Set TCP_NODELAY for low latency
+    if let Err(e) = stream.set_nodelay(true) {
+        warn!("Failed to set TCP_NODELAY on upstream connection: {}", e);
+    }
+
+    info!("Successfully connected to upstream: {} ({})", authority, addr);
+    Ok(stream)
+}
+
+/// Run bidirectional tunnel between client and upstream
+///
+/// Copies data in both directions until either side closes the connection.
+/// Handles graceful shutdown and error conditions.
+pub async fn run_tunnel(
+    client: &mut TokioIo<Upgraded>,
+    upstream: &mut TcpStream,
+) -> Result<(u64, u64), ConnectError> {
+    debug!("Starting bidirectional tunnel");
+
+    // Copy data in both directions concurrently
+    let result = copy_bidirectional(client, upstream)
+        .await
+        .map_err(ConnectError::TunnelError)?;
+
+    let (bytes_client_to_upstream, bytes_upstream_to_client) = result;
+    
+    info!(
+        "Tunnel closed: {} bytes sent to upstream, {} bytes received from upstream",
+        bytes_client_to_upstream, bytes_upstream_to_client
+    );
+
+    Ok((bytes_client_to_upstream, bytes_upstream_to_client))
+}
+
+/// Handle a complete CONNECT tunnel request
+///
+/// This is the main entry point for CONNECT handling:
+/// 1. Validate the request
+/// 2. Establish upstream connection
+/// 3. Send 200 Connection Established
+/// 4. Run bidirectional tunnel
+pub async fn handle_connect_tunnel(
+    mut request: Request<BodyWithMetrics<PolyBody>>,
+) -> Result<Response<PolyBody>, ConnectError> {
+    let version = request.version();
+    
+    // Only HTTP/1.1 supports traditional CONNECT
+    if version != Version::HTTP_11 {
+        warn!("CONNECT method only supported for HTTP/1.1, got {:?}", version);
+        return Err(ConnectError::InvalidAuthority(
+            "CONNECT only supported for HTTP/1.1".to_string()
+        ));
+    }
+
+    // Validate and extract authority
+    let authority = validate_connect_request(&request)?;
+    
+    // Get the upgrade future before consuming the request
+    let upgrade_future = hyper::upgrade::on(&mut request);
+    
+    // Establish upstream connection
+    let upstream = establish_upstream_connection(&authority).await?;
+    
+    // Create 200 Connection Established response
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .body(PolyBody::Empty(Empty::new()))
+        .unwrap();
+    
+    // Spawn task to handle tunnel after response is sent
+    tokio::spawn(async move {
+        match upgrade_future.await {
+            Ok(upgraded) => {
+                let mut client = TokioIo::new(upgraded);
+                let mut upstream = upstream;
+                
+                match run_tunnel(&mut client, &mut upstream).await {
+                    Ok((sent, received)) => {
+                        debug!("CONNECT tunnel completed: {} sent, {} received", sent, received);
+                    }
+                    Err(e) => {
+                        error!("CONNECT tunnel error: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to upgrade connection for CONNECT: {}", e);
+            }
+        }
+    });
+    
+    Ok(response)
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 //
-use super::{http_modifiers, upgrades as upgrade_utils, RequestHandler, TransactionHandler};
+use super::{connect, http_modifiers, upgrades as upgrade_utils, RequestHandler, TransactionHandler};
 use crate::event_error::{EventError, EventKind, TryInferFrom};
 use crate::{
     body::{body_with_metrics::BodyWithMetrics, body_with_timeout::BodyWithTimeout, response_flags::ResponseFlags},
@@ -47,7 +47,7 @@ use orion_tracing::attributes::{UPSTREAM_ADDRESS, UPSTREAM_CLUSTER_NAME};
 use orion_tracing::http_tracer::{SpanKind, SpanName};
 use smol_str::ToSmolStr;
 use std::net::SocketAddr;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 pub struct MatchedRequest<'a> {
     pub request: Request<BodyWithMetrics<BodyWithTimeout<Incoming>>>,
@@ -202,13 +202,17 @@ impl<'a> RequestHandler<(MatchedRequest<'a>, &HttpConnectionManager)> for &Route
                 // Handle CONNECT tunneling if enabled
                 if connect_enabled && is_connect_request {
                     debug!("Handling CONNECT tunnel request to {}", upstream_request.uri());
-                    // TODO: Implement actual CONNECT tunneling logic
-                    // For now, return 501 Not Implemented
-                    return Ok(SyntheticHttpResponse::custom_error(
-                        StatusCode::NOT_IMPLEMENTED,
-                        EventKind::UpgradeFailed,
-                        ResponseFlags::default()
-                    ).into_response(ver));
+                    return match connect::handle_connect_tunnel(upstream_request).await {
+                        Ok(response) => Ok(response),
+                        Err(e) => {
+                            error!("CONNECT tunnel failed: {}", e);
+                            Ok(SyntheticHttpResponse::custom_error(
+                                e.to_status_code(),
+                                EventKind::UpgradeFailed,
+                                ResponseFlags::default()
+                            ).into_response(ver))
+                        }
+                    };
                 }
 
                 // send the request to the upstream service channel and wait for the response...
