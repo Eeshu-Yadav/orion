@@ -23,6 +23,7 @@
 // https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
 #![allow(clippy::mutable_key_type)]
 
+mod connect;
 mod direct_response;
 mod http_modifiers;
 mod redirect;

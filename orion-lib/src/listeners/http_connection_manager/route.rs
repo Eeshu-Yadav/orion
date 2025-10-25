@@ -30,7 +30,7 @@ use crate::{
     PolyBody, Result,
 };
 
-use http::{uri::Parts as UriParts, Uri};
+use http::{uri::Parts as UriParts, StatusCode, Uri};
 use hyper::{body::Incoming, Request, Response};
 use opentelemetry::trace::Span;
 use opentelemetry::KeyValue;
@@ -173,6 +173,9 @@ impl<'a> RequestHandler<(MatchedRequest<'a>, &HttpConnectionManager)> for &Route
                 } else {
                     websocket_enabled_by_default
                 };
+                
+                let connect_enabled = self.upgrade_config.map(|uc| uc.is_connect_enabled()).unwrap_or(false);
+                
                 let should_upgrade_websocket = if websocket_enabled {
                     match upgrade_utils::is_valid_websocket_upgrade_request(upstream_request.headers()) {
                         Ok(maybe_upgrade) => maybe_upgrade,
@@ -188,8 +191,24 @@ impl<'a> RequestHandler<(MatchedRequest<'a>, &HttpConnectionManager)> for &Route
                     return upgrade_utils::handle_websocket_upgrade(trans_handler, upstream_request, &svc_channel)
                         .await;
                 }
+                
+                // Check if this is a CONNECT request
+                let is_connect_request = upstream_request.method() == http::Method::CONNECT;
+                
                 if let Some(direct_response) = http_modifiers::apply_preflight_functions(&mut upstream_request) {
                     return Ok(direct_response);
+                }
+                
+                // Handle CONNECT tunneling if enabled
+                if connect_enabled && is_connect_request {
+                    debug!("Handling CONNECT tunnel request to {}", upstream_request.uri());
+                    // TODO: Implement actual CONNECT tunneling logic
+                    // For now, return 501 Not Implemented
+                    return Ok(SyntheticHttpResponse::custom_error(
+                        StatusCode::NOT_IMPLEMENTED,
+                        EventKind::UpgradeFailed,
+                        ResponseFlags::default()
+                    ).into_response(ver));
                 }
 
                 // send the request to the upstream service channel and wait for the response...

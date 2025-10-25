@@ -334,6 +334,14 @@ impl UpgradeConfig {
         let locally_disabled = matches!(self.websocket, Some(Websocket::Disabled));
         locally_enabled || (enabled_via_hcm && !locally_disabled)
     }
+
+    pub fn is_connect_enabled(&self) -> bool {
+        matches!(self.connect, Some(Connect::Enabled { .. }))
+    }
+
+    pub fn get_connect_config(&self) -> Option<Connect> {
+        self.connect
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -1167,10 +1175,17 @@ mod envoy_conversions {
                     (WEBSOCKET, _) => upgrade_config.websocket = Some(Websocket::Enabled),
                     (CONNECT, Some(BoolValue { value: false })) => upgrade_config.connect = Some(Connect::Disabled),
                     (CONNECT, _) => {
-                        // CONNECT upgrades are not fully supported yet, but we accept the config
-                        // and mark it as disabled to avoid rejecting waypoint configurations
-                        tracing::warn!("Http CONNECT upgrades are not fully implemented, treating as disabled");
-                        upgrade_config.connect = Some(Connect::Disabled);
+                        let allow_post = envoy_upgrade_config
+                            .connect_config
+                            .as_ref()
+                            .map(|cc| cc.allow_post)
+                            .unwrap_or(false);
+                        
+                        tracing::info!(
+                            "CONNECT upgrade enabled (allow_post: {})",
+                            allow_post
+                        );
+                        upgrade_config.connect = Some(Connect::Enabled { allow_post });
                     },
                     (unknown, _) => {
                         return Err(GenericError::from_msg(format!("Unsupported upgrade type [{unknown}]")));
