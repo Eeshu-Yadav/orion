@@ -17,7 +17,6 @@
 use http::{Request, Response, StatusCode, Version};
 use http_body_util::{Empty, Full};
 use bytes::Bytes;
-use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
 use std::fmt;
 use std::io;
@@ -36,7 +35,9 @@ use crate::PolyBody;
 pub enum ConnectError {
     /// The authority form URI is invalid or missing
     InvalidAuthority(String),
-    /// CONNECT request contains a body (not allowed)
+    /// CONNECT request contains a body (not allowed per RFC 9110)
+    /// Currently unused but reserved for future validation
+    #[allow(dead_code)]
     BodyNotAllowed,
     /// Failed to connect to upstream
     UpstreamConnectionFailed(io::Error),
@@ -72,6 +73,8 @@ impl ConnectError {
     }
 
     /// Convert error to HTTP response
+    /// Currently unused - errors are handled in route.rs using to_status_code()
+    #[allow(dead_code)]
     pub fn to_response(&self) -> Response<Full<Bytes>> {
         let status = self.to_status_code();
         let body = format!("{}: {}\r\n", status.canonical_reason().unwrap_or("Error"), self);
@@ -164,10 +167,14 @@ pub async fn establish_upstream_connection(authority: &str) -> Result<TcpStream,
 ///
 /// Copies data in both directions until either side closes the connection.
 /// Handles graceful shutdown and error conditions.
-pub async fn run_tunnel(
-    client: &mut TokioIo<Upgraded>,
-    upstream: &mut TcpStream,
-) -> Result<(u64, u64), ConnectError> {
+pub async fn run_tunnel<C, U>(
+    client: &mut C,
+    upstream: &mut U,
+) -> Result<(u64, u64), ConnectError>
+where
+    C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    U: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     debug!("Starting bidirectional tunnel");
 
     // Copy data in both directions concurrently
@@ -304,4 +311,129 @@ mod tests {
             StatusCode::GATEWAY_TIMEOUT
         );
     }
+
+    #[tokio::test]
+    async fn test_establish_upstream_connection_success() {
+        // Start a test TCP server
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        
+        // Spawn server task
+        tokio::spawn(async move {
+            let (_socket, _addr) = listener.accept().await.unwrap();
+            // Just accept and hold the connection
+        });
+
+        // Test connecting to it
+        let result = establish_upstream_connection(&addr.to_string()).await;
+        assert!(result.is_ok(), "Should successfully connect to localhost");
+        
+        let stream = result.unwrap();
+        assert!(stream.peer_addr().is_ok(), "Should have valid peer address");
+    }
+
+    #[tokio::test]
+    async fn test_establish_upstream_connection_timeout() {
+        // Use a non-routable IP to trigger timeout
+        let result = establish_upstream_connection("192.0.2.1:80").await;
+        assert!(result.is_err(), "Should timeout connecting to non-routable IP");
+        
+        match result.unwrap_err() {
+            ConnectError::UpstreamTimeout | ConnectError::UpstreamConnectionFailed(_) => {},
+            other => panic!("Expected timeout or connection failed, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_establish_upstream_connection_invalid_host() {
+        let result = establish_upstream_connection("invalid-host-that-does-not-exist.local:80").await;
+        assert!(result.is_err(), "Should fail with invalid hostname");
+        
+        match result.unwrap_err() {
+            ConnectError::UpstreamConnectionFailed(_) => {},
+            other => panic!("Expected connection failed, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_tunnel_bidirectional() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Create two pairs of connected streams
+        let (mut client_local, client_remote) = tokio::io::duplex(1024);
+        let (mut upstream_local, upstream_remote) = tokio::io::duplex(1024);
+
+        // Don't wrap in TokioIo for tests - DuplexStream already implements AsyncRead/AsyncWrite
+        let mut client = client_remote;
+        let mut upstream = upstream_remote;
+
+        // Spawn tunnel task
+        let tunnel_handle = tokio::spawn(async move {
+            run_tunnel(&mut client, &mut upstream).await
+        });
+
+        // Test client -> upstream
+        let test_data = b"Hello from client";
+        client_local.write_all(test_data).await.unwrap();
+        
+        let mut buf = vec![0u8; test_data.len()];
+        upstream_local.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, test_data, "Data should flow from client to upstream");
+
+        // Test upstream -> client
+        let response_data = b"Hello from upstream";
+        upstream_local.write_all(response_data).await.unwrap();
+        
+        let mut buf = vec![0u8; response_data.len()];
+        client_local.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, response_data, "Data should flow from upstream to client");
+
+        // Close connections to end tunnel
+        drop(client_local);
+        drop(upstream_local);
+
+        // Wait for tunnel to complete
+        let result = tunnel_handle.await.unwrap();
+        assert!(result.is_ok(), "Tunnel should complete successfully");
+        
+        let (client_to_upstream, upstream_to_client) = result.unwrap();
+        assert_eq!(client_to_upstream, test_data.len() as u64);
+        assert_eq!(upstream_to_client, response_data.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_run_tunnel_large_data() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (mut client_local, client_remote) = tokio::io::duplex(64 * 1024);
+        let (mut upstream_local, upstream_remote) = tokio::io::duplex(64 * 1024);
+
+        let mut client = client_remote;
+        let mut upstream = upstream_remote;
+
+        let tunnel_handle = tokio::spawn(async move {
+            run_tunnel(&mut client, &mut upstream).await
+        });
+
+        // Send 1MB of data
+        let test_data = vec![0xAB; 1024 * 1024];
+        let data_len = test_data.len();
+        
+        tokio::spawn(async move {
+            client_local.write_all(&test_data).await.unwrap();
+            client_local.shutdown().await.unwrap();
+        });
+
+        let mut received = Vec::new();
+        upstream_local.read_to_end(&mut received).await.unwrap();
+        
+        assert_eq!(received.len(), data_len, "Should receive all data");
+        assert_eq!(received[0], 0xAB, "Data should be correct");
+        
+        drop(upstream_local);
+        
+        let result = tunnel_handle.await.unwrap();
+        assert!(result.is_ok(), "Large data transfer should succeed");
+    }
 }
+

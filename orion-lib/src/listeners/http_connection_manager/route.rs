@@ -30,7 +30,7 @@ use crate::{
     PolyBody, Result,
 };
 
-use http::{uri::Parts as UriParts, StatusCode, Uri};
+use http::{uri::Parts as UriParts, Uri};
 use hyper::{body::Incoming, Request, Response};
 use opentelemetry::trace::Span;
 use opentelemetry::KeyValue;
